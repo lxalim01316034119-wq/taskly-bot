@@ -6,13 +6,13 @@ from telebot import types
 from datetime import datetime
 from threading import Thread
 
-# Flask keep-alive for Koyeb / UptimeRobot
+# Flask keep-alive for Replit / Render / UptimeRobot
 try:
     from flask import Flask
     app = Flask(__name__)
     @app.route('/')
     def home():
-        return "Bot is Alive! Daily Bonus Active"
+        return "Taskly Bot is Alive! Tasks 1,2,6 Active"
     def run_flask():
         port = int(os.getenv('PORT', 8080))
         app.run(host='0.0.0.0', port=port)
@@ -29,6 +29,7 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 DATA_FILE = "users.json"
 
+# Tasks + Daily Bonus - Tomar 412.7K channel - UPDATED with 1,2,6
 DEFAULT_TASKS = [
     {
         "id": 1,
@@ -44,6 +45,13 @@ DEFAULT_TASKS = [
         "reward": 0.005,
         "link": None,
         "daily": True
+    },
+    {
+        "id": 6,
+        "title": "App Download ($0.05)",
+        "desc": "Amader Official App download koro.\nReward: $0.05 (Sobcheye beshi!)\n\nLink: https://play.google.com/store/apps/details?id=com.taskly.app\n\nDownload kore screenshot admin ke pathao, tarpor Claim koro.",
+        "reward": 0.05,
+        "link": "https://play.google.com/store/apps/details?id=com.taskly.app"
     }
 ]
 
@@ -61,12 +69,10 @@ def save_data():
         json.dump(users, f, indent=2)
 
 users = load_data()
-OWNER_ID = os.getenv("ADMIN_ID", "8643993376")
 
 def get_user(user_id):
     uid = str(user_id)
-    is_new = uid not in users
-    if is_new:
+    if uid not in users:
         users[uid] = {
             "balance": 0.0,
             "completed": [],
@@ -76,14 +82,6 @@ def get_user(user_id):
             "last_daily": None
         }
         save_data()
-        if uid != str(OWNER_ID):
-            if str(OWNER_ID) not in users:
-                users[str(OWNER_ID)] = {"balance":0.0,"completed":[],"referrals":0,"joined":datetime.now().strftime("%Y-%m-%d"),"verified":True,"last_daily":None}
-            users[str(OWNER_ID)]["balance"] += 0.01
-            users[str(OWNER_ID)]["referrals"] += 1
-            save_data()
-            try: bot.send_message(OWNER_ID, f"💰 New user joined! +$0.01\nUser: {uid}\nTotal: ${users[str(OWNER_ID)]['balance']:.4f}")
-            except: pass
     if "last_daily" not in users[uid]:
         users[uid]["last_daily"] = None
         save_data()
@@ -97,7 +95,7 @@ def main_menu():
     markup.row(types.KeyboardButton("👥 My Referrals"), types.KeyboardButton("🌐 Language"))
     return markup
 
-@bot.message_handler(commands=['start','reset'])
+@bot.message_handler(commands=['start'])
 def start(message):
     uid = str(message.from_user.id)
     user = get_user(message.from_user.id)
@@ -257,18 +255,15 @@ def lang(message):
 
 @bot.message_handler(func=lambda m: True)
 def default(message):
-    if message.text.startswith("/"):
-        start(message)
-    else:
-        bot.send_message(message.chat.id, "Use menu buttons below:", reply_markup=main_menu())
+    bot.send_message(message.chat.id, "Use menu buttons below:", reply_markup=main_menu())
 
-print("Bot Started with Daily Bonus! Polling...")
+print("Bot Started with Tasks 1,2,6 + Daily Bonus! Polling...")
 try:
     bot.delete_webhook(drop_pending_updates=True)
     print("Webhook cleared!")
 except: pass
 
-# AUTO-RECONNECT LOOP - Fixes Connection aborted error
+# AUTO-RECONNECT LOOP - 24h jonno
 while True:
     try:
         bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=20)
