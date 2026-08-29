@@ -12,7 +12,7 @@ try:
     app = Flask(__name__)
     @app.route('/')
     def home():
-        return "Taskly Bot is Alive! Tasks 1,2,6 Active"
+        return "Taskly Earn Official Bot is Alive! bKash/Nagad/Binance"
     def run_flask():
         port = int(os.getenv('PORT', 8080))
         app.run(host='0.0.0.0', port=port)
@@ -28,13 +28,20 @@ if not BOT_TOKEN:
 
 bot = telebot.TeleBot(BOT_TOKEN)
 DATA_FILE = "users.json"
+WITHDRAW_FILE = "withdraws.json"
+
+# Admin ID - Tomar Telegram ID ekhane bosao ba Render e ENV variable ADMIN_ID set koro
+# Telegram e @userinfobot e giye /start dile tomar ID pabe
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # 0 mane admin notify off, file e save hobe
 
 # Channel to check - Bot must be admin in this channel - TASKLY OFFICIAL
-CHANNEL_USERNAME = "@TasklyEarn_Official"  # tomar channel - TASKLY NEW
-CHANNEL_ID = "@TasklyEarn_Official"  # same, or use -100... id if private
+CHANNEL_USERNAME = "@TasklyEarn_Official"
+CHANNEL_ID = "@TasklyEarn_Official"
+
+# User state for withdraw flow: {user_id: {step, method, account}}
+user_states = {}
 
 def is_user_joined(user_id):
-    """Check if user joined channel"""
     try:
         member = bot.get_chat_member(CHANNEL_ID, user_id)
         return member.status in ['member', 'administrator', 'creator']
@@ -42,7 +49,6 @@ def is_user_joined(user_id):
         print(f"Join check error: {e}")
         return False
 
-# Tasks + Daily Bonus - Taskly Official channel - UPDATED with 1,2,6
 DEFAULT_TASKS = [
     {
         "id": 1,
@@ -81,7 +87,21 @@ def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(users, f, indent=2)
 
+def load_withdraws():
+    if os.path.exists(WITHDRAW_FILE):
+        try:
+            with open(WITHDRAW_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_withdraws():
+    with open(WITHDRAW_FILE, "w", encoding="utf-8") as f:
+        json.dump(withdraws, f, indent=2)
+
 users = load_data()
+withdraws = load_withdraws()
 
 def get_user(user_id):
     uid = str(user_id)
@@ -147,11 +167,33 @@ def start(message):
 def callback(call):
     uid = str(call.from_user.id)
     user = get_user(call.from_user.id)
+
     if call.data == "verify":
         user["verified"] = True
         save_data()
         bot.edit_message_text("✅ Verification successful! You now have access to tasks.\nPlease select a task.", call.message.chat.id, call.message.message_id)
         bot.send_message(call.message.chat.id, "Main menu:", reply_markup=main_menu())
+
+    elif call.data.startswith("withdraw_"):
+        method = call.data.split("_")[1]
+        if user["balance"] < 0.10:
+            bot.answer_callback_query(call.id, "❌ Minimum $0.10 needed!")
+            return
+        user_states[call.from_user.id] = {"step": "awaiting_account", "method": method}
+        method_name = {"bkash": "bKash", "nagad": "Nagad", "binance": "Binance (USDT/BEP20)"}[method]
+        bot.edit_message_text(
+            f"💸 {method_name} Withdraw Selected!\n\n"
+            f"💰 Your Balance: ${user['balance']:.4f}\n"
+            f"Minimum: $0.10\n\n"
+            f"👉 Ekhon apnar {method_name} number / ID din:\n"
+            f"bKash hole: 01XXXXXXXXX\n"
+            f"Nagad hole: 01XXXXXXXXX\n"
+            f"Binance hole: Binance ID / Email / Wallet Address\n\n"
+            f"❌ Cancel korte /cancel likhun",
+            call.message.chat.id, call.message.message_id
+        )
+        bot.answer_callback_query(call.id, f"{method_name} selected")
+
     elif call.data.startswith("task_"):
         task_id = int(call.data.split("_")[1])
         task = next((t for t in DEFAULT_TASKS if t["id"] == task_id), None)
@@ -166,9 +208,13 @@ def callback(call):
         markup = types.InlineKeyboardMarkup()
         if task.get("link"):
             markup.add(types.InlineKeyboardButton("🔗 Open Task", url=task["link"]))
-        markup.add(types.InlineKeyboardButton("✅ Claim / Completed", callback_data=f"done_{task_id}"))
+        if task_id in user["completed"]:
+            markup.add(types.InlineKeyboardButton("✅ Completed", callback_data="already_done"))
+        else:
+            markup.add(types.InlineKeyboardButton("✅ Claim / Completed", callback_data=f"done_{task_id}"))
         markup.add(types.InlineKeyboardButton("❌ Cancel", callback_data="cancel"))
-        bot.send_message(call.message.chat.id, f"📋 Task: {task['title']}\n\n{task['desc']}\n\nReview time: 1 min", reply_markup=markup)
+        bot.send_message(call.message.chat.id, f"📋 {task['title']}\n\n{task['desc']}\nReward: ${task['reward']:.4f}", reply_markup=markup)
+
     elif call.data.startswith("done_"):
         task_id = int(call.data.split("_")[1])
         task = next((t for t in DEFAULT_TASKS if t["id"] == task_id), None)
@@ -187,7 +233,6 @@ def callback(call):
         if task_id in user["completed"]:
             bot.answer_callback_query(call.id, "❌ Already completed!")
             return
-        # ✅ JOIN CHECK - Task 1 er jonno
         if task_id == 1:
             if not is_user_joined(call.from_user.id):
                 bot.answer_callback_query(call.id, "❌ Age channel e join koro!")
@@ -202,8 +247,21 @@ def callback(call):
         user["balance"] += task["reward"]
         save_data()
         bot.send_message(call.message.chat.id, f"🎉 Task completed! +${task['reward']:.4f} added.\nNew Balance: ${user['balance']:.4f}", reply_markup=main_menu())
+
     elif call.data == "cancel":
+        if call.from_user.id in user_states:
+            del user_states[call.from_user.id]
         bot.send_message(call.message.chat.id, "❌ Action cancelled.", reply_markup=main_menu())
+    elif call.data == "already_done":
+        bot.answer_callback_query(call.id, "Already completed!")
+
+@bot.message_handler(commands=['cancel'])
+def cancel_cmd(message):
+    if message.from_user.id in user_states:
+        del user_states[message.from_user.id]
+        bot.send_message(message.chat.id, "❌ Withdraw cancelled.", reply_markup=main_menu())
+    else:
+        bot.send_message(message.chat.id, "Nothing to cancel.", reply_markup=main_menu())
 
 @bot.message_handler(func=lambda m: m.text == "📋 Tasks")
 def show_tasks(message):
@@ -269,9 +327,119 @@ def refs(message):
 def withdraw(message):
     user = get_user(message.from_user.id)
     if user["balance"] < 0.10:
-        bot.send_message(message.chat.id, f"❌ Minimum $0.10\nYour: ${user['balance']:.4f}\nComplete tasks + daily bonus.", reply_markup=main_menu())
-    else:
-        bot.send_message(message.chat.id, f"💸 Withdraw ${user['balance']:.4f}\nContact admin: @your_admin_username\nID: {message.from_user.id}", reply_markup=main_menu())
+        bot.send_message(message.chat.id, f"❌ Minimum Withdraw $0.10\nYour Balance: ${user['balance']:.4f}\n\nComplete tasks + daily bonus + referrals to reach $0.10", reply_markup=main_menu())
+        return
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("📱 bKash (BDT)", callback_data="withdraw_bkash"),
+        types.InlineKeyboardButton("📱 Nagad (BDT)", callback_data="withdraw_nagad"),
+        types.InlineKeyboardButton("🟡 Binance USDT", callback_data="withdraw_binance"),
+        types.InlineKeyboardButton("❌ Cancel", callback_data="cancel")
+    )
+    bot.send_message(message.chat.id, 
+        f"💸 Withdraw - Select Method\n\n"
+        f"💰 Balance: ${user['balance']:.4f}\n"
+        f"Minimum: $0.10\n"
+        f"Rate: $1 = ~124 BDT (bKash/Nagad)\n\n"
+        f"👇 Method select korun:",
+        reply_markup=markup)
+
+@bot.message_handler(func=lambda m: m.from_user.id in user_states)
+def withdraw_flow(message):
+    uid = message.from_user.id
+    state = user_states.get(uid)
+    if not state:
+        return
+    if state["step"] == "awaiting_account":
+        account = message.text.strip()
+        if len(account) < 6:
+            bot.send_message(message.chat.id, "❌ Valid number/ID din! Abar try korun:")
+            return
+        state["account"] = account
+        state["step"] = "awaiting_amount"
+        bot.send_message(message.chat.id, 
+            f"✅ Account: {account}\n\n"
+            f"💰 Koto withdraw korben? Amount likhun:\n"
+            f"Example: 0.15\n"
+            f"Balance: ${get_user(uid)['balance']:.4f}\n"
+            f"Min: $0.10\n\n"
+            f"Full balance withdraw korte 'all' likhun."
+        )
+    elif state["step"] == "awaiting_amount":
+        user = get_user(uid)
+        txt = message.text.strip().lower()
+        if txt == "all":
+            amount = user["balance"]
+        else:
+            try:
+                amount = float(txt.replace("$", ""))
+            except:
+                bot.send_message(message.chat.id, "❌ Valid amount din! Example: 0.10 ba all")
+                return
+        if amount < 0.10:
+            bot.send_message(message.chat.id, f"❌ Minimum $0.10! Apni diyechen ${amount:.4f}")
+            return
+        if amount > user["balance"] + 0.0001:
+            bot.send_message(message.chat.id, f"❌ Balance kom! Balance: ${user['balance']:.4f}")
+            return
+        user["balance"] -= amount
+        save_data()
+        method_map = {"bkash": "bKash", "nagad": "Nagad", "binance": "Binance USDT"}
+        method_name = method_map.get(state["method"], state["method"])
+        record = {
+            "user_id": uid,
+            "username": message.from_user.username,
+            "name": message.from_user.first_name,
+            "method": method_name,
+            "account": state["account"],
+            "amount_usd": round(amount, 4),
+            "amount_bdt": round(amount * 124, 2) if state["method"] in ["bkash", "nagad"] else None,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "status": "pending"
+        }
+        withdraws.append(record)
+        save_withdraws()
+        del user_states[uid]
+        bdt_txt = f" (~{record['amount_bdt']} BDT)" if record['amount_bdt'] else ""
+        bot.send_message(message.chat.id,
+            f"✅ Withdraw Request Received!\n\n"
+            f"💳 Method: {method_name}\n"
+            f"🔢 Account: {state['account']}\n"
+            f"💵 Amount: ${amount:.4f}{bdt_txt}\n"
+            f"⏰ Time: {record['time']}\n"
+            f"📋 Status: Pending (24h er moddhe payment)\n\n"
+            f"💰 New Balance: ${user['balance']:.4f}\n\n"
+            f"Admin apnake payment korbe, tarpor channel e proof deya hobe!",
+            reply_markup=main_menu()
+        )
+        if ADMIN_ID != 0:
+            try:
+                bot.send_message(ADMIN_ID,
+                    f"🔔 NEW WITHDRAW REQUEST!\n\n"
+                    f"👤 User: {record['name']} (@{record['username']})\n"
+                    f"🆔 ID: {uid}\n"
+                    f"💳 Method: {method_name}\n"
+                    f"🔢 Account: {state['account']}\n"
+                    f"💵 Amount: ${amount:.4f}{bdt_txt}\n"
+                    f"⏰ {record['time']}\n\n"
+                    f"Payment diye /admin_withdraws e giye paid mark koro."
+                )
+            except Exception as e:
+                print(f"Admin notify failed: {e}")
+
+@bot.message_handler(commands=['admin_withdraws'])
+def admin_withdraws(message):
+    if ADMIN_ID != 0 and message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Admin only!")
+        return
+    if not withdraws:
+        bot.send_message(message.chat.id, "No withdraw requests yet.")
+        return
+    txt = f"📋 Total Withdraws: {len(withdraws)}\n\n"
+    for w in withdraws[-10:][::-1]:
+        bdt = f" ({w['amount_bdt']} BDT)" if w.get('amount_bdt') else ""
+        txt += f"👤 {w['name']} | {w['method']} | ${w['amount_usd']}{bdt} | {w['account']} | {w['status']} | {w['time']}\n\n"
+    bot.send_message(message.chat.id, txt)
 
 @bot.message_handler(func=lambda m: m.text in ["🌐 Language", "Language"])
 def lang(message):
@@ -279,15 +447,16 @@ def lang(message):
 
 @bot.message_handler(func=lambda m: True)
 def default(message):
+    if message.from_user.id in user_states:
+        return
     bot.send_message(message.chat.id, "Use menu buttons below:", reply_markup=main_menu())
 
-print("Bot Started with Tasks 1,2,6 + Daily Bonus! Polling...")
+print("Bot Started with Tasks 1,2,6 + bKash/Nagad/Binance Withdraw! Polling...")
 try:
     bot.delete_webhook(drop_pending_updates=True)
     print("Webhook cleared!")
 except: pass
 
-# AUTO-RECONNECT LOOP - 24h jonno
 while True:
     try:
         bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=20)
