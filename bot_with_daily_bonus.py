@@ -29,14 +29,27 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 DATA_FILE = "users.json"
 
-# Tasks + Daily Bonus - Tomar 412.7K channel - UPDATED with 1,2,6
+# Channel to check - Bot must be admin in this channel - TASKLY OFFICIAL
+CHANNEL_USERNAME = "@TasklyEarn_Official"  # tomar channel - TASKLY NEW
+CHANNEL_ID = "@TasklyEarn_Official"  # same, or use -100... id if private
+
+def is_user_joined(user_id):
+    """Check if user joined channel"""
+    try:
+        member = bot.get_chat_member(CHANNEL_ID, user_id)
+        return member.status in ['member', 'administrator', 'creator']
+    except Exception as e:
+        print(f"Join check error: {e}")
+        return False
+
+# Tasks + Daily Bonus - Taskly Official channel - UPDATED with 1,2,6
 DEFAULT_TASKS = [
     {
         "id": 1,
         "title": "Channel Subscription ($0.01)",
-        "desc": "Amader Telegram Channel e join koro.\nReward: $0.01\n\nLink: https://t.me/DasadOfficial\n\nJoin korar por Check button e click koro.",
+        "desc": "Amader Telegram Channel e join koro.\nReward: $0.01\n\nLink: https://t.me/TasklyEarn_Official\n\nJoin korar por Check button e click koro.",
         "reward": 0.01,
-        "link": "https://t.me/DasadOfficial"
+        "link": "https://t.me/TasklyEarn_Official"
     },
     {
         "id": 2,
@@ -174,6 +187,17 @@ def callback(call):
         if task_id in user["completed"]:
             bot.answer_callback_query(call.id, "❌ Already completed!")
             return
+        # ✅ JOIN CHECK - Task 1 er jonno
+        if task_id == 1:
+            if not is_user_joined(call.from_user.id):
+                bot.answer_callback_query(call.id, "❌ Age channel e join koro!")
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("🔗 Join Channel", url="https://t.me/TasklyEarn_Official"))
+                markup.add(types.InlineKeyboardButton("✅ I Joined - Check Again", callback_data=f"done_{task_id}"))
+                bot.send_message(call.message.chat.id, 
+                    f"❌ Tumi ekhono channel e join koro nai!\n\n👉 Age {CHANNEL_USERNAME} e join koro, tarpor 'I Joined - Check Again' e click koro.",
+                    reply_markup=markup)
+                return
         user["completed"].append(task_id)
         user["balance"] += task["reward"]
         save_data()
