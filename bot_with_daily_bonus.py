@@ -12,7 +12,7 @@ try:
     app = Flask(__name__)
     @app.route('/')
     def home():
-        return "Taskly Earn Official Bot is Alive! bKash/Nagad/Binance"
+        return "Taskly Bot is Alive! bKash/Nagad/Binance + Admin AddBalance"
     def run_flask():
         port = int(os.getenv('PORT', 8080))
         app.run(host='0.0.0.0', port=port)
@@ -30,15 +30,12 @@ bot = telebot.TeleBot(BOT_TOKEN)
 DATA_FILE = "users.json"
 WITHDRAW_FILE = "withdraws.json"
 
-# Admin ID - Tomar Telegram ID ekhane bosao ba Render e ENV variable ADMIN_ID set koro
-# Telegram e @userinfobot e giye /start dile tomar ID pabe
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # 0 mane admin notify off, file e save hobe
+# Admin ID - Tomar Telegram ID - @userinfobot e /start dile ID pabe
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
-# Channel to check - Bot must be admin in this channel - TASKLY OFFICIAL
 CHANNEL_USERNAME = "@TasklyEarn_Official"
 CHANNEL_ID = "@TasklyEarn_Official"
 
-# User state for withdraw flow: {user_id: {step, method, account}}
 user_states = {}
 
 def is_user_joined(user_id):
@@ -263,6 +260,104 @@ def cancel_cmd(message):
     else:
         bot.send_message(message.chat.id, "Nothing to cancel.", reply_markup=main_menu())
 
+# ========= ADMIN COMMANDS =========
+@bot.message_handler(commands=['addbalance', 'add_balance'])
+def add_balance_cmd(message):
+    # Only admin can use
+    if ADMIN_ID != 0 and message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Admin only!")
+        return
+    try:
+        parts = message.text.split()
+        if len(parts) < 3:
+            bot.send_message(message.chat.id, "❌ Usage: /addbalance USER_ID AMOUNT\nExample: /addbalance 123456789 0.20\nOr /addbalance me 0.20 (nijer jonno)")
+            return
+        target = parts[1]
+        if target.lower() == "me":
+            target_id = str(message.from_user.id)
+        else:
+            target_id = target.strip()
+        amount = float(parts[2])
+        user = get_user(int(target_id) if target_id.isdigit() else target_id)
+        # get_user expects int id, but we have string; ensure entry exists
+        uid = str(target_id)
+        if uid not in users:
+            users[uid] = {
+                "balance": 0.0,
+                "completed": [],
+                "referrals": 0,
+                "joined": datetime.now().strftime("%Y-%m-%d"),
+                "verified": True,
+                "last_daily": None
+            }
+        users[uid]["balance"] += amount
+        save_data()
+        bot.send_message(message.chat.id, f"✅ Added ${amount:.4f} to {uid}\nNew Balance: ${users[uid]['balance']:.4f}")
+        # notify user if possible
+        try:
+            if target_id.isdigit():
+                bot.send_message(int(target_id), f"🎉 Admin added ${amount:.4f} to your balance!\nNew Balance: ${users[uid]['balance']:.4f}")
+        except:
+            pass
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Error: {e}\nUsage: /addbalance USER_ID AMOUNT")
+
+@bot.message_handler(commands=['removebalance', 'remove_balance'])
+def remove_balance_cmd(message):
+    if ADMIN_ID != 0 and message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Admin only!")
+        return
+    try:
+        parts = message.text.split()
+        if len(parts) < 3:
+            bot.send_message(message.chat.id, "❌ Usage: /removebalance USER_ID AMOUNT")
+            return
+        target_id = parts[1].strip()
+        amount = float(parts[2])
+        uid = str(target_id)
+        if uid not in users:
+            bot.send_message(message.chat.id, "❌ User not found!")
+            return
+        users[uid]["balance"] = max(0, users[uid]["balance"] - amount)
+        save_data()
+        bot.send_message(message.chat.id, f"✅ Removed ${amount:.4f} from {uid}\nNew Balance: ${users[uid]['balance']:.4f}")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Error: {e}")
+
+@bot.message_handler(commands=['checkbalance', 'check_balance'])
+def check_balance_cmd(message):
+    if ADMIN_ID != 0 and message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Admin only!")
+        return
+    try:
+        parts = message.text.split()
+        if len(parts) < 2:
+            bot.send_message(message.chat.id, "❌ Usage: /checkbalance USER_ID")
+            return
+        target_id = parts[1].strip()
+        uid = str(target_id)
+        if uid not in users:
+            bot.send_message(message.chat.id, "❌ User not found!")
+            return
+        u = users[uid]
+        bot.send_message(message.chat.id, f"👤 User: {uid}\n💰 Balance: ${u['balance']:.4f}\n📋 Completed: {len(u['completed'])}\n👥 Referrals: {u['referrals']}")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Error: {e}")
+
+@bot.message_handler(commands=['admin_withdraws'])
+def admin_withdraws(message):
+    if ADMIN_ID != 0 and message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Admin only!")
+        return
+    if not withdraws:
+        bot.send_message(message.chat.id, "No withdraw requests yet.")
+        return
+    txt = f"📋 Total Withdraws: {len(withdraws)}\n\n"
+    for w in withdraws[-10:][::-1]:
+        bdt = f" ({w['amount_bdt']} BDT)" if w.get('amount_bdt') else ""
+        txt += f"👤 {w['name']} | {w['method']} | ${w['amount_usd']}{bdt} | {w['account']} | {w['status']} | {w['time']}\n\n"
+    bot.send_message(message.chat.id, txt)
+
 @bot.message_handler(func=lambda m: m.text == "📋 Tasks")
 def show_tasks(message):
     user = get_user(message.from_user.id)
@@ -427,20 +522,6 @@ def withdraw_flow(message):
             except Exception as e:
                 print(f"Admin notify failed: {e}")
 
-@bot.message_handler(commands=['admin_withdraws'])
-def admin_withdraws(message):
-    if ADMIN_ID != 0 and message.from_user.id != ADMIN_ID:
-        bot.send_message(message.chat.id, "❌ Admin only!")
-        return
-    if not withdraws:
-        bot.send_message(message.chat.id, "No withdraw requests yet.")
-        return
-    txt = f"📋 Total Withdraws: {len(withdraws)}\n\n"
-    for w in withdraws[-10:][::-1]:
-        bdt = f" ({w['amount_bdt']} BDT)" if w.get('amount_bdt') else ""
-        txt += f"👤 {w['name']} | {w['method']} | ${w['amount_usd']}{bdt} | {w['account']} | {w['status']} | {w['time']}\n\n"
-    bot.send_message(message.chat.id, txt)
-
 @bot.message_handler(func=lambda m: m.text in ["🌐 Language", "Language"])
 def lang(message):
     bot.send_message(message.chat.id, "🌐 Language: English (Default)", reply_markup=main_menu())
@@ -451,7 +532,7 @@ def default(message):
         return
     bot.send_message(message.chat.id, "Use menu buttons below:", reply_markup=main_menu())
 
-print("Bot Started with Tasks 1,2,6 + bKash/Nagad/Binance Withdraw! Polling...")
+print("Bot Started with bKash/Nagad/Binance + Admin AddBalance! Polling...")
 try:
     bot.delete_webhook(drop_pending_updates=True)
     print("Webhook cleared!")
